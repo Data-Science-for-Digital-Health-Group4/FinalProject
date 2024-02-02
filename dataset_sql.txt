@@ -1,0 +1,188 @@
+with hrs_data as (with patient_data as (WITH cirrhosis_data AS (
+  SELECT icu.subject_id, icu.hadm_id, icu.stay_id
+  FROM `physionet-data.mimiciv_derived.icustay_detail` as icu
+  INNER JOIN `physionet-data.mimiciv_hosp.diagnoses_icd` as icd ON icd.subject_id = icu.subject_id AND icd.hadm_id = icu.hadm_id
+  WHERE (icd_code LIKE '570%' OR icd_code LIKE 'K7%' OR icd_code LIKE '571%' OR icd_code LIKE '572%') 
+),
+
+aki_icd_data AS(
+  SELECT icu.subject_id, icu.hadm_id, icu.stay_id
+  FROM `physionet-data.mimiciv_derived.icustay_detail` as icu
+  INNER JOIN `physionet-data.mimiciv_hosp.diagnoses_icd` as icd ON icd.subject_id = icu.subject_id AND icd.hadm_id = icu.hadm_id
+  WHERE (icd_code LIKE '584%' OR icd_code LIKE 'N17%' OR icd_code LIKE 'N18%' OR icd_code LIKE 'N19%')
+),
+
+aki_creatinine AS(
+  WITH aki_data AS (
+    SELECT
+      icu.subject_id, icu.hadm_id, icu.stay_id,
+      case
+          when cr.creat_low_past_7day >= (b.scr_baseline*3.0) then 3
+          when b.scr_baseline >= 4 and cr.creat_low_past_48hr >= (b.scr_baseline+0.3)  then 3 
+          when b.scr_baseline >= 4 and cr.creat_low_past_7day >= (b.scr_baseline*3.0) then 3
+          when b.scr_baseline <= 4 and cr.creat_low_past_7day >= (b.scr_baseline*2.0) and cr.creat_low_past_7day <= (b.scr_baseline*3.0) then 2
+          when b.scr_baseline <= 4 and cr.creat_low_past_48hr >= (b.scr_baseline+0.3) then 1
+          when b.scr_baseline <= 4 and cr.creat_low_past_7day >= (b.scr_baseline*1.5) then 1
+      else 0 end as aki_stage_creat
+    FROM `physionet-data.mimiciv_derived.icustay_detail` as icu
+    INNER JOIN `physionet-data.mimiciv_derived.kdigo_creatinine` AS cr ON cr.hadm_id = icu.hadm_id AND cr.stay_id = icu.stay_id
+    INNER JOIN `physionet-data.mimiciv_derived.creatinine_baseline` AS b ON icu.hadm_id = b.hadm_id
+  )
+  select subject_id, hadm_id, stay_id
+  from aki_data
+  WHERE NOT aki_stage_creat = 0
+),
+aki_rrt AS(
+  select c.stay_id, c.hadm_id, c.subject_id
+  from `physionet-data.mimiciv_derived.icustay_detail` as icu
+  INNER JOIN cirrhosis_data  as c ON c.stay_id = icu.stay_id
+  INNER JOIN `physionet-data.mimiciv_derived.rrt` AS rrt ON icu.stay_id = rrt.stay_id
+  WHERE rrt.dialysis_active = 1 
+),
+
+akiuo_data AS(
+  SELECT icu.subject_id, icu.hadm_id, icu.stay_id
+  FROM `physionet-data.mimiciv_derived.icustay_detail` as icu
+  INNER JOIN `physionet-data.mimiciv_derived.urine_output_rate` AS u ON icu.stay_id = u.stay_id
+  WHERE u.uo_mlkghr_6hr < 0.5
+),
+
+aki_data AS (
+  SELECT icu.subject_id, icu.hadm_id, icu.stay_id
+  FROM `physionet-data.mimiciv_derived.icustay_detail` as icu
+  RIGHT JOIN aki_icd_data as icd ON icd.subject_id = icu.subject_id AND icd.hadm_id = icu.hadm_id AND icd.stay_id = icu.stay_id
+  FULL JOIN akiuo_data as uo on uo.subject_id = icd.subject_id AND uo.hadm_id = icd.hadm_id AND uo.stay_id = icd.stay_id
+  FULL JOIN aki_creatinine as c ON c.subject_id = icd.subject_id AND c.hadm_id = icd.hadm_id AND c.stay_id = icd.stay_id
+  --FULL JOIN aki_rrt as r ON r.subject_id = icd.subject_id AND r.hadm_id = icd.hadm_id AND r.stay_id = icd.stay_id
+)
+
+SELECT DISTINCT c.subject_id, c.hadm_id, c.stay_id, RANK() OVER (PARTITION BY c.subject_id ORDER BY icu_intime ASC) AS rank
+FROM cirrhosis_data AS c
+INNER JOIN `physionet-data.mimiciv_derived.icustay_detail` as icu ON icu.subject_id = c.subject_id AND icu.hadm_id = c.hadm_id AND icu.stay_id = c.stay_id
+INNER JOIN aki_data as aki ON aki.subject_id = c.subject_id AND aki.hadm_id = c.hadm_id AND aki.stay_id = c.stay_id
+--INNER JOIN aki_rrt as r on r.subject_id = aki.subject_id AND r.hadm_id = aki.hadm_id AND r.stay_id = aki.stay_id
+)
+SELECT * EXCEPT(rank) FROM patient_data
+WHERE rank = 1
+ORDER BY subject_id
+)
+SELECT distinct h.subject_id, h.stay_id, h.hadm_id, i.hospital_expire_flag, i.gender, i.admission_age,l.subject_id
+,hematocrit_min
+,hematocrit_max
+,hemoglobin_min
+,hemoglobin_max
+,platelets_min
+,platelets_max
+,wbc_min
+,wbc_max
+,albumin_min
+,albumin_max
+,globulin_min
+,globulin_max
+,total_protein_min
+,total_protein_max
+,aniongap_min
+,aniongap_max
+,bicarbonate_min
+,bicarbonate_max
+,bun_min
+,bun_max
+,calcium_min
+,calcium_max
+,chloride_min
+,chloride_max
+,creatinine_min
+,creatinine_max
+,sodium_min
+,sodium_max
+,potassium_min
+,potassium_max
+,abs_basophils_min
+,abs_basophils_max
+,abs_eosinophils_min
+,abs_eosinophils_max
+,abs_lymphocytes_min
+,abs_lymphocytes_max
+,abs_monocytes_min
+,abs_monocytes_max
+,abs_neutrophils_min
+,abs_neutrophils_max
+,atyps_min
+,atyps_max
+,bands_min
+,bands_max
+,imm_granulocytes_min
+,imm_granulocytes_max
+,metas_min
+,metas_max
+,nrbc_min
+,nrbc_max
+,d_dimer_min
+,d_dimer_max
+,fibrinogen_min
+,fibrinogen_max
+,thrombin_min
+,thrombin_max
+,inr_min
+,inr_max
+,pt_min
+,pt_max
+,ptt_min
+,ptt_max
+,alt_min
+,alt_max
+,alp_min
+,alp_max
+,ast_min
+,ast_max
+,amylase_min
+,amylase_max
+,bilirubin_total_min
+,bilirubin_total_max
+,bilirubin_direct_min
+,bilirubin_direct_max
+,bilirubin_indirect_min
+,bilirubin_indirect_max
+,ck_cpk_min
+,ck_cpk_max
+,ck_mb_min
+,ck_mb_max
+,ggt_min
+,ggt_max
+,ld_ldh_min
+,ld_ldh_max
+, u.urineoutput
+, v.heart_rate_min
+,heart_rate_max
+,heart_rate_mean
+,sbp_min
+,sbp_max
+,sbp_mean
+,dbp_min
+,dbp_max
+,dbp_mean
+,mbp_min
+,mbp_max
+,mbp_mean
+,resp_rate_min
+,resp_rate_max
+,resp_rate_mean
+,temperature_min
+,temperature_max
+,temperature_mean
+,spo2_min
+,spo2_max
+,spo2_mean
+,v.glucose_min
+,v.glucose_max
+,glucose_mean
+FROM hrs_data as h
+INNER JOIN`physionet-data.mimiciv_derived.first_day_lab` AS l
+ON h.stay_id = l.stay_id
+INNER JOIN`physionet-data.mimiciv_derived.first_day_urine_output` AS u
+ON h.stay_id = u.stay_id
+JOIN `physionet-data.mimiciv_derived.icustay_detail` AS i
+ON h.stay_id = i.stay_id
+INNER JOIN `physionet-data.mimiciv_derived.first_day_vitalsign` as v
+ON h.stay_id = v.stay_id
+
